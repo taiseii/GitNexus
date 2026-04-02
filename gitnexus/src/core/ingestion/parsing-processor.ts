@@ -31,6 +31,8 @@ import {
 } from './utils/method-props.js';
 import type { LanguageProvider } from './language-provider.js';
 import type { RPackageConfig } from './language-config.js';
+import { findRFieldOwnerNode, getRTopLevelPropertyOwnerName } from './field-extractors/r.js';
+import { getRTopLevelMethodOwnerName } from './method-extractors/r.js';
 import { WorkerPool } from './workers/worker-pool.js';
 import type {
   ParseWorkerResult,
@@ -172,9 +174,6 @@ const processParsingWithWorkers = async (
       .join(', ');
     console.warn(`  Skipped unsupported languages: ${summary}`);
   }
-
-  attachDeferredROwners(graph, symbolTable, 'Method', 'HAS_METHOD');
-  attachDeferredROwners(graph, symbolTable, 'Property', 'HAS_PROPERTY');
 
   // Final progress
   onFileProgress?.(total, total, 'done');
@@ -634,6 +633,19 @@ const processParsingSequential = async (
       graph.addNode(node);
 
       // enclosingClassId already computed above (before nodeId generation)
+      // R-specific deferred owner hints for setMethod/property nodes
+      const ownerNameHint =
+        language === SupportedLanguages.R && definitionNode
+          ? nodeLabel === 'Method'
+            ? (getRTopLevelMethodOwnerName(definitionNode) ??
+                getRTopLevelPropertyOwnerName(definitionNode))
+            : nodeLabel === 'Property'
+              ? getRTopLevelPropertyOwnerName(definitionNode)
+              : null
+          : null;
+      if (!enclosingClassId && ownerNameHint) {
+        node.properties.ownerNameHint = ownerNameHint;
+      }
 
       // Extract declared type and field metadata for Property nodes
       let declaredType: string | undefined;
@@ -643,7 +655,9 @@ const processParsingSequential = async (
       if (nodeLabel === 'Property' && definitionNode) {
         // FieldExtractor is the single source of truth when available
         if (provider.fieldExtractor && typeEnv) {
-          const classNode = seqFindEnclosingClassNode(definitionNode);
+          const classNode =
+            seqFindEnclosingClassNode(definitionNode) ??
+            (language === SupportedLanguages.R ? findRFieldOwnerNode(definitionNode) : null);
           if (classNode) {
             const fieldMap = seqGetFieldInfo(classNode, provider, {
               typeEnv,
@@ -754,7 +768,9 @@ export const processParsing = async (
     await processParsingSequential(graph, files, symbolTable, astCache, onFileProgress);
   }
 
-  // Post-processing: refine R export status using NAMESPACE data
+  // Post-processing: resolve deferred R owner hints and refine NAMESPACE exports
+  attachDeferredROwners(graph, symbolTable, 'Method', 'HAS_METHOD');
+  attachDeferredROwners(graph, symbolTable, 'Property', 'HAS_PROPERTY');
   refineRExportStatus(graph, rPackageConfig ?? null);
 
   return result;

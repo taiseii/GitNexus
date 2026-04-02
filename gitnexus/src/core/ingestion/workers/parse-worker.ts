@@ -1291,7 +1291,8 @@ const resolveSyntheticOwnerId = (
 
   const ownerName =
     nodeLabel === 'Method'
-      ? getRTopLevelMethodOwnerName(definitionNode)
+      ? (getRTopLevelMethodOwnerName(definitionNode) ??
+          getRTopLevelPropertyOwnerName(definitionNode))
       : nodeLabel === 'Property'
         ? getRTopLevelPropertyOwnerName(definitionNode)
         : null;
@@ -1887,7 +1888,9 @@ const processFileGroup = (
         let enrichedByMethodExtractor = false;
         if (provider.methodExtractor && definitionNode) {
           const classNode =
-            findEnclosingClassNode(definitionNode) ?? findClassNodeByQualifiedName(definitionNode);
+            findEnclosingClassNode(definitionNode) ??
+            findClassNodeByQualifiedName(definitionNode) ??
+            (language === SupportedLanguages.R ? findRFieldOwnerNode(definitionNode) : null);
           if (classNode) {
             const methodMap = getMethodInfo(classNode, provider, {
               filePath: file.path,
@@ -2044,7 +2047,8 @@ const processFileGroup = (
       const ownerNameHint =
         language === SupportedLanguages.R && definitionNode
           ? nodeLabel === 'Method'
-            ? getRTopLevelMethodOwnerName(definitionNode)
+            ? (getRTopLevelMethodOwnerName(definitionNode) ??
+                getRTopLevelPropertyOwnerName(definitionNode))
             : nodeLabel === 'Property'
               ? getRTopLevelPropertyOwnerName(definitionNode)
               : null

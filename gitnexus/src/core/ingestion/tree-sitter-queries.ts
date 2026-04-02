@@ -1352,6 +1352,60 @@ export const R_QUERIES = `
         (#match? @_arg "^inherit$")
         value: (identifier) @heritage.extends)))) @heritage
 
+; ── R6 Fields via namespace (non-function entries in public/private list()) ──
+(binary_operator
+  lhs: (identifier) @_class
+  rhs: (call
+    function: (namespace_operator
+      rhs: (identifier) @_nsfn
+      (#match? @_nsfn "^R6Class$"))
+    arguments: (arguments
+      (argument
+        name: (identifier) @_section
+        (#match? @_section "^(public|private)$")
+        value: (call
+          function: (identifier) @_listfn
+          (#match? @_listfn "^list$")
+          arguments: (arguments
+            (argument
+              name: (identifier) @name
+              value: (_) @_val
+              (#not-match? @_val "^function_definition$")) @definition.property))))))
+
+; ── R6 Fields via bare call ──────────────────────────────────────────────────
+(binary_operator
+  lhs: (identifier) @_class2
+  rhs: (call
+    function: (identifier) @_r6fn
+    (#match? @_r6fn "^R6Class$")
+    arguments: (arguments
+      (argument
+        name: (identifier) @_section2
+        (#match? @_section2 "^(public|private)$")
+        value: (call
+          function: (identifier) @_listfn2
+          (#match? @_listfn2 "^list$")
+          arguments: (arguments
+            (argument
+              name: (identifier) @name
+              value: (_) @_val2
+              (#not-match? @_val2 "^function_definition$")) @definition.property))))))
+
+; ── S4 slots / representation ────────────────────────────────────────────────
+(call
+  function: (identifier) @_fn
+  (#match? @_fn "^(setClass|setRefClass)$")
+  arguments: (arguments
+    (argument
+      name: (identifier) @_slotArg
+      (#match? @_slotArg "^(representation|slots|fields)$")
+      value: (call
+        function: (identifier) @_listfn
+        (#match? @_listfn "^(list|representation)$")
+        arguments: (arguments
+          (argument
+            name: (identifier) @name) @definition.property)))))
+
 ; ── Roxygen2 doc comments ────────────────────────────────────────────────────
 (comment) @comment
 `;

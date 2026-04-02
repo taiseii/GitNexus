@@ -11,6 +11,7 @@ import Go from 'tree-sitter-go';
 import Rust from 'tree-sitter-rust';
 import PHP from 'tree-sitter-php';
 import Ruby from 'tree-sitter-ruby';
+import R from '@eagleoutice/tree-sitter-r';
 import { createRequire } from 'node:module';
 import { SupportedLanguages } from 'gitnexus-shared';
 import { getProvider } from '../languages/index.js';
@@ -65,6 +66,8 @@ import { extractParsedCallSite } from '../call-sites/extract-language-call-site.
 import { buildTypeEnv } from '../type-env.js';
 import type { ConstructorBinding } from '../type-env.js';
 import { detectFrameworkFromAST } from '../framework-detection.js';
+import { findRFieldOwnerNode, getRTopLevelPropertyOwnerName } from '../field-extractors/r.js';
+import { getRTopLevelMethodOwnerName } from '../method-extractors/r.js';
 import { generateId } from '../../../lib/utils.js';
 import { preprocessImportPath } from '../import-processor.js';
 import {
@@ -294,6 +297,7 @@ const languageMap: Record<string, TreeSitterLanguage> = {
   [SupportedLanguages.Ruby]: Ruby,
   [SupportedLanguages.Vue]: TypeScript.typescript,
   ...(Dart ? { [SupportedLanguages.Dart]: Dart } : {}),
+  [SupportedLanguages.R]: R,
   ...(Swift ? { [SupportedLanguages.Swift]: Swift } : {}),
 };
 
@@ -1277,6 +1281,28 @@ export function extractORMQueries(
   }
 }
 
+const resolveSyntheticOwnerId = (
+  language: SupportedLanguages,
+  nodeLabel: NodeLabel,
+  definitionNode: SyntaxNode | undefined,
+  result: ParseWorkerResult,
+): string | null => {
+  if (language !== SupportedLanguages.R || !definitionNode) return null;
+
+  const ownerName =
+    nodeLabel === 'Method'
+      ? getRTopLevelMethodOwnerName(definitionNode)
+      : nodeLabel === 'Property'
+        ? getRTopLevelPropertyOwnerName(definitionNode)
+        : null;
+  if (!ownerName) return null;
+
+  const ownerSymbols = result.symbols.filter(
+    (sym) => sym.name === ownerName && sym.type === 'Class',
+  );
+  return ownerSymbols.length === 1 ? ownerSymbols[0].nodeId : null;
+};
+
 const processFileGroup = (
   files: ParseWorkerInput[],
   language: SupportedLanguages,
@@ -1966,7 +1992,9 @@ const processFileGroup = (
       if (nodeLabel === 'Property' && definitionNode) {
         // FieldExtractor is the single source of truth when available
         if (provider.fieldExtractor && typeEnv) {
-          const classNode = findEnclosingClassNode(definitionNode);
+          const classNode =
+            findEnclosingClassNode(definitionNode) ??
+            (language === SupportedLanguages.R ? findRFieldOwnerNode(definitionNode) : null);
           if (classNode) {
             const fieldMap = getFieldInfo(classNode, provider, {
               typeEnv,
@@ -2012,6 +2040,15 @@ const processFileGroup = (
       });
 
       // enclosingClassId already computed above (before nodeId generation)
+      // R-specific deferred owner hints for setMethod/property nodes
+      const ownerNameHint =
+        language === SupportedLanguages.R && definitionNode
+          ? nodeLabel === 'Method'
+            ? getRTopLevelMethodOwnerName(definitionNode)
+            : nodeLabel === 'Property'
+              ? getRTopLevelPropertyOwnerName(definitionNode)
+              : null
+          : null;
 
       result.symbols.push({
         filePath: file.path,
@@ -2025,6 +2062,7 @@ const processFileGroup = (
         returnType: methodProps.returnType as string | undefined,
         ...(declaredType !== undefined ? { declaredType } : {}),
         ...(enclosingClassId ? { ownerId: enclosingClassId } : {}),
+        ...(ownerNameHint && !enclosingClassId ? { ownerNameHint } : {}),
         visibility: methodProps.visibility as string | undefined,
         isStatic: methodProps.isStatic as boolean | undefined,
         isReadonly: methodProps.isReadonly as boolean | undefined,
@@ -2055,6 +2093,13 @@ const processFileGroup = (
         confidence: 1.0,
         reason: '',
       });
+
+      // Backfill ownerId / ownerNameHint on the graph node we already pushed
+      if (enclosingClassId) {
+        result.nodes[result.nodes.length - 1].properties.ownerId = enclosingClassId;
+      } else if (ownerNameHint) {
+        result.nodes[result.nodes.length - 1].properties.ownerNameHint = ownerNameHint;
+      }
 
       // ── HAS_METHOD / HAS_PROPERTY: link member to enclosing class ──
       if (enclosingClassId) {

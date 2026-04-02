@@ -290,6 +290,22 @@ describe('SymbolTable', () => {
       expect(table.lookupFieldByOwner('class:User', 'name')!.declaredType).toBe('string');
       expect(table.lookupFieldByOwner('class:Repo', 'name')!.declaredType).toBe('RepoName');
     });
+
+    it('backfills ownerId for delayed property ownership', () => {
+      table.add('src/models.ts', 'name', 'prop:name', 'Property', {
+        declaredType: 'string',
+      });
+
+      expect(table.lookupFieldByOwner('class:User', 'name')).toBeUndefined();
+      expect(table.updateOwnerId('prop:name', 'class:User')).toBe(true);
+      expect(table.lookupFieldByOwner('class:User', 'name')).toEqual({
+        nodeId: 'prop:name',
+        filePath: 'src/models.ts',
+        type: 'Property',
+        declaredType: 'string',
+        ownerId: 'class:User',
+      });
+    });
   });
 
   describe('lookupMethodByOwner', () => {

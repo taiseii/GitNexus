@@ -112,6 +112,12 @@ export interface SymbolTable {
   lookupClassByQualifiedName: (qualifiedName: string) => SymbolDefinition[];
 
   /**
+   * Backfill or correct a member symbol owner after delayed owner discovery.
+   * Updates the shared SymbolDefinition object across indexes.
+   */
+  updateOwnerId: (nodeId: string, ownerId: string) => boolean;
+
+  /**
    * Debugging: See how many symbols are tracked
    */
   getStats: () => {
@@ -154,6 +160,9 @@ export const createSymbolTable = (): SymbolTable => {
   // Only Class, Struct, Interface, Enum, Record symbols are indexed.
   const classByName = new Map<string, SymbolDefinition[]>();
   const classByQualifiedName = new Map<string, SymbolDefinition[]>();
+
+  // 7. Node Index — lets delayed owner discovery update existing definitions in place.
+  const nodeIndex = new Map<string, { definition: SymbolDefinition; name: string }>();
 
   let fuzzyCallCount = 0;
 
@@ -208,6 +217,8 @@ export const createSymbolTable = (): SymbolTable => {
     } else {
       fileMap.get(name)!.push(def);
     }
+
+    nodeIndex.set(nodeId, { definition: def, name });
 
     // B. Properties go to fieldByOwner index only — skip globalIndex to prevent
     // namespace pollution for common names like 'id', 'name', 'type'.
@@ -325,6 +336,22 @@ export const createSymbolTable = (): SymbolTable => {
     return classByQualifiedName.get(qualifiedName) ?? [];
   };
 
+  const updateOwnerId = (nodeId: string, ownerId: string): boolean => {
+    const indexed = nodeIndex.get(nodeId);
+    if (!indexed) return false;
+
+    const { definition, name } = indexed;
+    const previousOwnerId = definition.ownerId;
+    definition.ownerId = ownerId;
+
+    if (definition.type === 'Property') {
+      if (previousOwnerId) fieldByOwner.delete(`${previousOwnerId}\0${name}`);
+      fieldByOwner.set(`${ownerId}\0${name}`, definition);
+    }
+
+    return true;
+  };
+
   const getStats = () => ({
     fileCount: fileIndex.size,
     globalSymbolCount: globalIndex.size,
@@ -340,6 +367,7 @@ export const createSymbolTable = (): SymbolTable => {
     methodByOwner.clear();
     classByName.clear();
     classByQualifiedName.clear();
+    nodeIndex.clear();
     fuzzyCallCount = 0;
     fuzzyCallableCallCount = 0;
   };
@@ -355,6 +383,7 @@ export const createSymbolTable = (): SymbolTable => {
     lookupMethodByOwner,
     lookupClassByName,
     lookupClassByQualifiedName,
+    updateOwnerId,
     getStats,
     clear,
   };

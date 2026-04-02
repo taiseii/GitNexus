@@ -1,4 +1,5 @@
 import type { GraphNode, GraphRelationship, NodeLabel } from 'gitnexus-shared';
+import { SupportedLanguages } from 'gitnexus-shared';
 import { KnowledgeGraph } from '../graph/types.js';
 import Parser from 'tree-sitter';
 import { loadParser, loadLanguage, isLanguageAvailable } from '../tree-sitter/parser-loader.js';
@@ -29,6 +30,7 @@ import {
   buildCollisionGroups,
 } from './utils/method-props.js';
 import type { LanguageProvider } from './language-provider.js';
+import type { RPackageConfig } from './language-config.js';
 import { WorkerPool } from './workers/worker-pool.js';
 import type {
   ParseWorkerResult,
@@ -171,6 +173,9 @@ const processParsingWithWorkers = async (
     console.warn(`  Skipped unsupported languages: ${summary}`);
   }
 
+  attachDeferredROwners(graph, symbolTable, 'Method', 'HAS_METHOD');
+  attachDeferredROwners(graph, symbolTable, 'Property', 'HAS_PROPERTY');
+
   // Final progress
   onFileProgress?.(total, total, 'done');
   return {
@@ -218,6 +223,88 @@ const cachedExportCheck = (
   const result = checker(node, name);
   exportCache.set(node, result);
   return result;
+};
+
+const attachDeferredROwners = (
+  graph: KnowledgeGraph,
+  symbolTable: SymbolTable,
+  nodeLabel: 'Method' | 'Property',
+  relationshipType: 'HAS_METHOD' | 'HAS_PROPERTY',
+): void => {
+  graph.forEachNode((node) => {
+    if (node.label !== nodeLabel) return;
+    if (typeof node.properties.ownerId === 'string') {
+      delete node.properties.ownerNameHint;
+      return;
+    }
+    const ownerNameHint =
+      typeof node.properties.ownerNameHint === 'string' ? node.properties.ownerNameHint : null;
+    if (!ownerNameHint) return;
+
+    const ownerDefs = symbolTable.lookupFuzzy(ownerNameHint).filter((def) => def.type === 'Class');
+    if (ownerDefs.length !== 1) return;
+
+    const ownerId = ownerDefs[0].nodeId;
+    node.properties.ownerId = ownerId;
+    delete node.properties.ownerNameHint;
+    symbolTable.updateOwnerId(node.id, ownerId);
+    graph.addRelationship({
+      id: generateId(relationshipType, `${ownerId}->${node.id}`),
+      sourceId: ownerId,
+      targetId: node.id,
+      type: relationshipType,
+      confidence: 1.0,
+      reason: '',
+    });
+  });
+};
+
+const refineRExportStatus = (
+  graph: KnowledgeGraph,
+  rPackageConfig: RPackageConfig | null,
+): void => {
+  if (!rPackageConfig) return;
+
+  const normalizePath = (fp: string) => fp.replace(/\\/g, '/');
+  const findPackageDir = (filePath: string): string | null => {
+    const normalized = normalizePath(filePath);
+    let best: string | null = null;
+    for (const pkgDir of rPackageConfig.packages.values()) {
+      const prefix = pkgDir ? `${pkgDir}/` : '';
+      if (normalized.startsWith(prefix) && (best == null || pkgDir.length > best.length)) {
+        best = pkgDir;
+      }
+    }
+    return best;
+  };
+  const matchesPattern = (name: string, patterns: readonly string[]): boolean => {
+    for (const p of patterns) {
+      try {
+        if (new RegExp(p).test(name)) return true;
+      } catch {
+        /* skip invalid */
+      }
+    }
+    return false;
+  };
+
+  graph.forEachNode((node) => {
+    if (node.properties.language !== SupportedLanguages.R) return;
+    const filePath = node.properties.filePath;
+    if (typeof filePath !== 'string') return;
+
+    const pkgDir = findPackageDir(filePath);
+    const nsInfo = pkgDir ? rPackageConfig.namespaceInfoByPackageDir.get(pkgDir) : undefined;
+    if (!nsInfo) return; // No NAMESPACE data -> keep default (true)
+
+    const name = node.properties.name;
+    if (typeof name !== 'string') return;
+
+    if (nsInfo.namedExports.has(name)) return; // Already exported
+    if (matchesPattern(name, nsInfo.exportPatterns)) return;
+    // If not in NAMESPACE exports and has no roxygen @export -> not exported
+    node.properties.isExported = false;
+  });
 };
 
 // FieldExtractor cache for sequential path — same pattern as parse-worker.ts
@@ -641,10 +728,12 @@ export const processParsing = async (
   astCache: ASTCache,
   onFileProgress?: FileProgressCallback,
   workerPool?: WorkerPool,
+  rPackageConfig?: RPackageConfig | null,
 ): Promise<WorkerExtractedData | null> => {
+  let result: WorkerExtractedData | null = null;
   if (workerPool) {
     try {
-      return await processParsingWithWorkers(
+      result = await processParsingWithWorkers(
         graph,
         files,
         symbolTable,
@@ -660,7 +749,13 @@ export const processParsing = async (
     }
   }
 
-  // Fallback: sequential parsing (no pre-extracted data)
-  await processParsingSequential(graph, files, symbolTable, astCache, onFileProgress);
-  return null;
+  if (!result) {
+    // Fallback: sequential parsing (no pre-extracted data)
+    await processParsingSequential(graph, files, symbolTable, astCache, onFileProgress);
+  }
+
+  // Post-processing: refine R export status using NAMESPACE data
+  refineRExportStatus(graph, rPackageConfig ?? null);
+
+  return result;
 };

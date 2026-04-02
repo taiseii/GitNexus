@@ -3,6 +3,7 @@ import { processStructure } from './structure-processor.js';
 import { processMarkdown } from './markdown-processor.js';
 import { processCobol, isCobolFile, isJclFile } from './cobol-processor.js';
 import { processParsing } from './parsing-processor.js';
+import { loadRPackageConfig } from './language-config.js';
 import {
   processImports,
   processImportsFromExtracted,
@@ -766,6 +767,7 @@ async function runChunkedParseAndResolve(
   // Build import resolution context once — suffix index, file lists, resolve cache.
   // Reused across all chunks to avoid rebuilding O(files × path_depth) structures.
   const importCtx = buildImportResolutionContext(allPaths);
+  const rPackageConfig = await loadRPackageConfig(repoPath);
   const allPathObjects = allPaths.map((p) => ({ path: p }));
 
   // Worker path: parse + imports + heritage per chunk; buffer extracted calls and
@@ -830,6 +832,7 @@ async function runChunkedParseAndResolve(
           });
         },
         workerPool,
+        rPackageConfig,
       );
 
       const chunkBasePercent = 20 + (filesParsedSoFar / totalParseable) * 62;

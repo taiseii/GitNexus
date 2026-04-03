@@ -128,49 +128,6 @@ describe('R function definitions and calls', () => {
     expect(countCall).toBeDefined();
   });
 
-  it.todo('resolves calls inside native and magrittr pipe chains', () => {
-    const calls = getRelationships(result, 'CALLS');
-    const cleanNativeCall = calls.find(
-      (e) =>
-        e.sourceFilePath.includes('s4_and_r6.R') &&
-        e.target === 'clean_native' &&
-        e.targetFilePath.includes('s4_and_r6.R'),
-    );
-    const transformNativeCall = calls.find(
-      (e) =>
-        e.sourceFilePath.includes('s4_and_r6.R') &&
-        e.target === 'transform_native' &&
-        e.targetFilePath.includes('s4_and_r6.R'),
-    );
-    const cleanMagrittrCall = calls.find(
-      (e) =>
-        e.sourceFilePath.includes('s4_and_r6.R') &&
-        e.target === 'clean_magrittr' &&
-        e.targetFilePath.includes('s4_and_r6.R'),
-    );
-    const transformMagrittrCall = calls.find(
-      (e) =>
-        e.sourceFilePath.includes('s4_and_r6.R') &&
-        e.target === 'transform_magrittr' &&
-        e.targetFilePath.includes('s4_and_r6.R'),
-    );
-
-    expect(cleanNativeCall).toBeDefined();
-    expect(transformNativeCall).toBeDefined();
-    expect(cleanMagrittrCall).toBeDefined();
-    expect(transformMagrittrCall).toBeDefined();
-  });
-
-  it.todo('resolves S3 generic calls to class-specific methods when the first argument type is known', () => {
-    const calls = getRelationships(result, 'CALLS');
-    const s3DispatchCall = calls.find(
-      (e) => e.target === 'describe.FancyWidget' && e.targetFilePath.includes('s3.R'),
-    );
-
-    expect(s3DispatchCall).toBeDefined();
-    expect(s3DispatchCall?.rel.sourceId.includes('pkgA/R/s3.R')).toBe(true);
-  });
-
   // --- S4 setGeneric / setMethod detection ---
 
   it('detects S4 setGeneric as a function definition', () => {

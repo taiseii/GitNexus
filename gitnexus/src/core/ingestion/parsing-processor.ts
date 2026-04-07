@@ -1,5 +1,5 @@
 import type { GraphNode, GraphRelationship, NodeLabel } from 'gitnexus-shared';
-import { SupportedLanguages } from 'gitnexus-shared';
+import { getLanguageFromFilename, SupportedLanguages } from 'gitnexus-shared';
 import { KnowledgeGraph } from '../graph/types.js';
 import Parser from 'tree-sitter';
 import { loadParser, loadLanguage, isLanguageAvailable } from '../tree-sitter/parser-loader.js';
@@ -7,7 +7,6 @@ import { getProvider } from './languages/index.js';
 import { generateId } from '../../lib/utils.js';
 import type { SymbolTable } from './symbol-table.js';
 import { ASTCache } from './ast-cache.js';
-import { getLanguageFromFilename, SupportedLanguages } from 'gitnexus-shared';
 import { extractVueScript, isVueSetupTopLevel } from './vue-sfc-extractor.js';
 import { yieldToEventLoop } from './utils/event-loop.js';
 import {
@@ -638,7 +637,7 @@ const processParsingSequential = async (
         language === SupportedLanguages.R && definitionNode
           ? nodeLabel === 'Method'
             ? (getRTopLevelMethodOwnerName(definitionNode) ??
-                getRTopLevelPropertyOwnerName(definitionNode))
+              getRTopLevelPropertyOwnerName(definitionNode))
             : nodeLabel === 'Property'
               ? getRTopLevelPropertyOwnerName(definitionNode)
               : null

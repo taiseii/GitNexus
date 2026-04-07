@@ -34,6 +34,16 @@ describe('R function definitions and calls', () => {
     expect(functions).toContain('HelperFunc');
   });
 
+  it('detects functions defined with <<- super-assignment', () => {
+    const functions = getNodesByLabel(result, 'Function');
+    expect(functions).toContain('SuperAssignFunc');
+  });
+
+  it('detects functions with dot-separated names', () => {
+    const functions = getNodesByLabel(result, 'Function');
+    expect(functions).toContain('my.helper.func');
+  });
+
   // --- Class detection ---
 
   it('detects S4 class defined with setClass', () => {
@@ -49,6 +59,11 @@ describe('R function definitions and calls', () => {
   it('detects R6 class defined with R6::R6Class', () => {
     const classes = getNodesByLabel(result, 'Class');
     expect(classes).toContain('ResultSet');
+  });
+
+  it('detects R6 class defined with bare R6Class() call', () => {
+    const classes = getNodesByLabel(result, 'Class');
+    expect(classes).toContain('BareR6');
   });
 
   // --- Import resolution ---
@@ -68,6 +83,15 @@ describe('R function definitions and calls', () => {
     );
     expect(libEdges.length).toBeGreaterThanOrEqual(1);
     expect(libEdges.some((e) => e.targetFilePath.includes('clean_data.R'))).toBe(true);
+  });
+
+  it('resolves require() to IMPORTS edges for package files', () => {
+    const imports = getRelationships(result, 'IMPORTS');
+    const requireEdges = imports.filter(
+      (e) => e.sourceFilePath.includes('run_analysis.R') && e.targetFilePath.includes('pkgA/R/'),
+    );
+    // require("pkgA") should resolve to at least one file in pkgA/R/
+    expect(requireEdges.length).toBeGreaterThanOrEqual(1);
   });
 
   // --- Cross-package resolution ---
@@ -117,6 +141,75 @@ describe('R function definitions and calls', () => {
     expect(r5Methods.some((e) => e.target === 'process')).toBe(true);
   });
 
+  // --- R6 private methods and fields ---
+
+  it('detects R6 private methods inside private = list(...)', () => {
+    const methods = getNodesByLabel(result, 'Method');
+    expect(methods).toContain('compute');
+  });
+
+  it('emits HAS_METHOD edge from R6 class to private method', () => {
+    const hasMethod = getRelationships(result, 'HAS_METHOD');
+    const privateMethod = hasMethod.find(
+      (e) => e.source === 'AdvancedR6' && e.target === 'compute',
+    );
+    expect(privateMethod).toBeDefined();
+  });
+
+  it('detects R6 private fields with correct visibility', () => {
+    const properties = getNodesByLabelFull(result, 'Property');
+    const secretKey = properties.find(
+      (p) => p.name === 'secret_key' && p.properties.filePath.includes('r6_advanced.R'),
+    );
+    expect(secretKey).toBeDefined();
+    expect(secretKey!.properties.visibility).toBe('private');
+  });
+
+  // --- R6 active bindings ---
+
+  it('detects R6 active bindings as methods', () => {
+    const methods = getNodesByLabel(result, 'Method');
+    expect(methods).toContain('display_name');
+  });
+
+  it('emits HAS_METHOD edge from R6 class to active binding', () => {
+    const hasMethod = getRelationships(result, 'HAS_METHOD');
+    const activeBinding = hasMethod.find(
+      (e) => e.source === 'AdvancedR6' && e.target === 'display_name',
+    );
+    expect(activeBinding).toBeDefined();
+  });
+
+  it('detects methods inside bare R6Class() call', () => {
+    const hasMethod = getRelationships(result, 'HAS_METHOD');
+    const bareMethod = hasMethod.find((e) => e.source === 'BareR6' && e.target === 'get_value');
+    expect(bareMethod).toBeDefined();
+  });
+
+  // --- R6 field type inference ---
+
+  it('infers R6 field types from default values', () => {
+    const properties = getNodesByLabelFull(result, 'Property');
+
+    const nameField = properties.find(
+      (p) => p.name === 'name' && p.properties.filePath.includes('r6_advanced.R'),
+    );
+    expect(nameField).toBeDefined();
+    expect(nameField!.properties.declaredType).toBe('character');
+
+    const countField = properties.find(
+      (p) => p.name === 'active_count' && p.properties.filePath.includes('r6_advanced.R'),
+    );
+    expect(countField).toBeDefined();
+    expect(countField!.properties.declaredType).toBe('integer');
+
+    const flagField = properties.find(
+      (p) => p.name === 'internal_flag' && p.properties.filePath.includes('r6_advanced.R'),
+    );
+    expect(flagField).toBeDefined();
+    expect(flagField!.properties.declaredType).toBe('logical');
+  });
+
   it('resolves rs$count() call to ResultSet.count method', () => {
     const calls = getRelationships(result, 'CALLS');
     const countCall = calls.find(
@@ -154,6 +247,23 @@ describe('R function definitions and calls', () => {
     expect(childEdge).toBeDefined();
   });
 
+  it('detects S4 classes from multi-parent setClass with contains=c()', () => {
+    // The S4 heritage queries capture parent names but the heritage processor requires
+    // a heritage.class capture which setClass queries do not emit; EXTENDS edges for
+    // S4 contains= are therefore not produced. This test verifies the class nodes are
+    // at minimum detected from the fixture.
+    const classes = getNodesByLabel(result, 'Class');
+    expect(classes).toContain('MultiChild');
+    expect(classes).toContain('BaseA');
+    expect(classes).toContain('BaseB');
+  });
+
+  it('emits EXTENDS edge from R6 class defined with bare R6Class() via inherit=', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    const bareEdge = extends_.find((e) => e.source === 'BareR6' && e.target === 'Parent');
+    expect(bareEdge).toBeDefined();
+  });
+
   it('applies NAMESPACE exports per package instead of as a repo-wide name set', () => {
     const functions = getNodesByLabelFull(result, 'Function').filter(
       (n) => n.name === 'PackageScoped',
@@ -186,6 +296,41 @@ describe('R function definitions and calls', () => {
 
     expect(patternScoped?.properties.isExported).toBe(true);
     expect(s3Method?.properties.isExported).toBe(true);
+  });
+
+  it('applies exportClasses() and exportMethods() directives from NAMESPACE', () => {
+    const classes = getNodesByLabelFull(result, 'Class');
+    const exportedClass = classes.find(
+      (n) =>
+        n.name === 'ExportedS4Class' && n.properties.filePath.includes('pkgB/R/s4_export_test.R'),
+    );
+    expect(exportedClass).toBeDefined();
+    expect(exportedClass!.properties.isExported).toBe(true);
+
+    const functions = getNodesByLabelFull(result, 'Function');
+    const exportedMethod = functions.find(
+      (n) =>
+        n.name === 'exportedMethod' && n.properties.filePath.includes('pkgB/R/s4_export_test.R'),
+    );
+    expect(exportedMethod).toBeDefined();
+    expect(exportedMethod!.properties.isExported).toBe(true);
+  });
+
+  it('defaults all functions to exported when no NAMESPACE file exists', () => {
+    const functions = getNodesByLabelFull(result, 'Function');
+    const roxygenFunc = functions.find(
+      (n) =>
+        n.name === 'RoxygenExported' && n.properties.filePath.includes('pkgC/R/default_export.R'),
+    );
+    const noTagFunc = functions.find(
+      (n) => n.name === 'NoExportTag' && n.properties.filePath.includes('pkgC/R/default_export.R'),
+    );
+
+    expect(roxygenFunc).toBeDefined();
+    expect(noTagFunc).toBeDefined();
+    // Without NAMESPACE, rExportChecker defaults to true for all functions
+    expect(roxygenFunc!.properties.isExported).toBe(true);
+    expect(noTagFunc!.properties.isExported).toBe(true);
   });
 
   it('populates field metadata on R Property nodes', () => {

@@ -9,3 +9,6 @@ print(clean)
 # R6 method call resolution
 rs <- ResultSet$new(list(1, 2, 3))
 n <- rs$count()
+
+# require() should resolve identically to library()
+require("pkgA")

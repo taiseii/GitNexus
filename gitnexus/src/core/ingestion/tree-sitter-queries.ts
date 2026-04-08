@@ -1305,6 +1305,9 @@ export const R_QUERIES = `
   function: (identifier) @_fn
   (#match? @_fn "^(setClass|setRefClass)$")
   arguments: (arguments
+    . (argument
+      value: (string
+        content: (string_content) @heritage.class))
     (argument
       name: (identifier) @_arg
       (#match? @_arg "^(contains|CONTAINS)$")
@@ -1316,6 +1319,9 @@ export const R_QUERIES = `
   function: (identifier) @_fn2
   (#match? @_fn2 "^(setClass|setRefClass)$")
   arguments: (arguments
+    . (argument
+      value: (string
+        content: (string_content) @heritage.class))
     (argument
       name: (identifier) @_arg2
       (#match? @_arg2 "^(contains|CONTAINS)$")

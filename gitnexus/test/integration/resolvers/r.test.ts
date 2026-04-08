@@ -248,14 +248,24 @@ describe('R function definitions and calls', () => {
   });
 
   it('detects S4 classes from multi-parent setClass with contains=c()', () => {
-    // The S4 heritage queries capture parent names but the heritage processor requires
-    // a heritage.class capture which setClass queries do not emit; EXTENDS edges for
-    // S4 contains= are therefore not produced. This test verifies the class nodes are
-    // at minimum detected from the fixture.
     const classes = getNodesByLabel(result, 'Class');
     expect(classes).toContain('MultiChild');
     expect(classes).toContain('BaseA');
     expect(classes).toContain('BaseB');
+  });
+
+  it('emits EXTENDS edges from S4 multi-parent setClass with contains=c()', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    const toBaseA = extends_.find((e) => e.source === 'MultiChild' && e.target === 'BaseA');
+    const toBaseB = extends_.find((e) => e.source === 'MultiChild' && e.target === 'BaseB');
+    expect(toBaseA).toBeDefined();
+    expect(toBaseB).toBeDefined();
+  });
+
+  it('emits EXTENDS edge from S4 class with single-parent contains=', () => {
+    const extends_ = getRelationships(result, 'EXTENDS');
+    const edge = extends_.find((e) => e.source === 'DataModel' && e.target === 'VIRTUAL');
+    expect(edge).toBeDefined();
   });
 
   it('emits EXTENDS edge from R6 class defined with bare R6Class() via inherit=', () => {
